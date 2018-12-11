@@ -1,3 +1,0 @@
-/nv/coc-ice/kwang336/p3/p30/build/CMakeFiles/p30.dir
-/nv/coc-ice/kwang336/p3/p30/build/CMakeFiles/rebuild_cache.dir
-/nv/coc-ice/kwang336/p3/p30/build/CMakeFiles/edit_cache.dir
