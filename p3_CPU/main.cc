@@ -73,7 +73,8 @@ int main(int argc, char **argv) {
     //Complex* invDftData = doDft(dftData, width, height, false);
   
     std::cout << "writing" << std::endl;
-    im.save_image_data(outputFile, invDftData, width, height);
+    im.save_image_data(outputFile, dftData, width, height);
+    // im.save_image_data(outputFile, invDftData, width, height);
     std::cout << "dunzo" << std::endl;
     return 0;
 }
