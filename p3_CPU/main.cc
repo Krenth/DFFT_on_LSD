@@ -12,18 +12,19 @@ using std::vector;
  * (forward is the default, though)
  */
 Complex* doDft(Complex* data, int width, int height, bool forward = true) {
-    int expOp = forward ? 1 : -1;
-    float sumOp = forward ? 1.0 : float(1.0/width);
+    int expOp = forward ? -1 : 1;
+    Complex sumOp= forward ? Complex(1.0) : Complex(float(1.0/width));
     Complex* dftData = new Complex[width*height];
+    Complex sum;
+
     // Horiz
     for (int iH = 0; iH < height; iH++) {
         for (int iW = 0; iW < width; iW++) {
-            Complex sum = Complex();
+            sum =  Complex();
             for (int t = 0; t < width; t++) {
-                double angle = 2.0 * M_PI * float(t) * float(iW) / float(width);
-                //sum = sum + data[iH * width + t] * exp(-angle); 
-                sum.real = sum.real + data[iH * width + t].real * cos(angle);
-                sum.imag = sum.imag + expOp * data[iH * width + t].real * sin(angle);
+                double angle = expOp * 2.0 * M_PI * float(t) * float(iW) / float(width);
+                Complex expTerm = Complex(cos(angle),sin(angle));
+                sum = sum + data[iH * width + t] * expTerm;
             }        
             dftData[iH * width + iW] = sum * sumOp;
         }
@@ -31,15 +32,14 @@ Complex* doDft(Complex* data, int width, int height, bool forward = true) {
 
     // Vert
     Complex* dftData2 = new Complex[width*height];
-    sumOp = forward ? 1.0 : float(1.0/height);
+    sumOp = forward ? Complex(1.0) : Complex(float(1.0/height));
     for (int iW = 0; iW < width; iW++) {
         for (int iH = 0; iH < height; iH++) {
-            Complex sum = Complex();
+            sum = Complex();
             for (int t = 0; t < height; t++) {
-                double angle = 2.0 * M_PI * float(t) * float(iW) / float(height);
-                sum.real = sum.real + dftData[iH * t + iW].real * cos(angle);
-                sum.imag = sum.imag + expOp * dftData[iH * t + iW].real * sin(angle);
-
+                double angle = expOp * 2.0 * M_PI * float(t) * float(iH) / float(height);
+                Complex expTerm = Complex(cos(angle),sin(angle));
+                sum = sum + dftData[t * width + iW] * expTerm; 
             }        
             dftData2[iH * width + iW] = sum * sumOp;
         }
