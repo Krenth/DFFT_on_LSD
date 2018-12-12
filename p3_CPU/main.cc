@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     int height = im.get_height();
    
     Complex* data = im.get_image_data();
-    Complex* dftData = doDft(data, width, height);
+    Complex* dftData = doDft(data, width, height, isForward);
     //Complex* invDftData = doDft(dftData, width, height, false);
   
     std::cout << "writing" << std::endl;
