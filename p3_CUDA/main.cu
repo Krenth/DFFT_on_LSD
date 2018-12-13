@@ -13,7 +13,7 @@ struct blockData
     int width;
     int height;
     int expOp;
-    Complex sumOp;
+    float sumOp;
 };
 
 struct ComplexCUDA
@@ -21,69 +21,99 @@ struct ComplexCUDA
     float real;
     float imag;
 };
+__device__ struct ComplexCUDA complexMult(struct ComplexCUDA a, struct ComplexCUDA b) {
+    struct ComplexCUDA c;
+    c.real = a.real*b.real-a.imag*b.imag;
+    c.imag = a.real*b.imag+a.imag*b.real;
+    return c;
+};
+__device__ struct ComplexCUDA complexAdd(struct ComplexCUDA a, struct ComplexCUDA b) {
+    struct ComplexCUDA c;
+    c.real = a.real+b.real;
+    c.imag = a.imag+b.imag;
+    return c;
+};
+__device__ struct ComplexCUDA createComplexCUDA() {
+    struct ComplexCUDA c;
+    c.real = 0;
+    c.imag = 0;
+    return c;
+};
+__device__ struct ComplexCUDA createComplexCUDA(float a) {
+    struct ComplexCUDA c;
+    c.real = a;
+    c.imag = 0;
+    return c;
+};
+__device__ struct ComplexCUDA createComplexCUDA(float a, float b) {
+    struct ComplexCUDA c;
+    c.real = a;
+    c.imag = b;
+    return c;
+};
 
-__global__ void blockDftHoriz(struct ComplexCUDA *dftData, struct ComplexCUDA *indata, struct blockData *hbd)
+__global__ void blockDftHoriz(struct ComplexCUDA *dftData, struct ComplexCUDA *indata, struct blockData *bd)
 {
-    __shared__ struct blockData bd;
-    bd = *hbd;
-    __shared__ Complex data[bd.width];
-    __shared__ double angle[bd.width];
-    __shared__ Complex expTerm[bd.width];
-    __shared__ Complex sum[bd.width];
+    __shared__ struct ComplexCUDA data[2048];
+    data[blockIdx.x*bd->width+threadIdx.x] = indata[blockIdx.x*bd->width+threadIdx.x];
+    __shared__ struct ComplexCUDA expTerm[2048];
+    __shared__ struct ComplexCUDA sum[2048];
 
-    data[threadIdx.x] = indata[blockIdx.x*bd.width+threadIdx.x];
-    data[threadIdx.x+(bd.width+1)/2] = indata[blockIdx.x*bd.width+threadIdx.x+(bd.width+1)/2];
-        
-    for (int t = 0; t < bd.width; t++)
+    sum[threadIdx.x] = createComplexCUDA(0);
+    if (threadIdx.x+(bd->width+1)/2 < bd->width) 
     {
-        angle[threadIdx.x] = bd.expOp * 2.0 * M_PI * float(t) * float(threadIdx.x) / float(bd.width);
-        expTerm[threadIdx.x] = Complex(cos(angle[threadIdx.x]), sin(angle[threadIdx.x]));
-        sum[threadIdx.x] = sum[threadIdx.x] + data[t] * expTerm[threadIdx.x];
+        sum[threadIdx.x+(bd->width+1)/2] = createComplexCUDA(0);
+    }
+    __syncthreads();
+    for (int t = 0; t < bd->width; t++)
+    {
+        expTerm[threadIdx.x] = createComplexCUDA(cos(float(bd->expOp) * 2.0 * 3.14159 * float(t) * float(threadIdx.x) / float(bd->width)),sin(bd->expOp * 2.0 * 3.14159 * float(t) * float(threadIdx.x) / float(bd->width)));
+        sum[threadIdx.x] = complexAdd(sum[threadIdx.x],complexMult(data[blockIdx.x*bd->width+t],expTerm[threadIdx.x]));
 
-        if (threadIdx.x+(bd.width+1)/2 < bd.width) 
+        if (threadIdx.x+(bd->width+1)/2 < bd->width) 
         {
-            angle[threadIdx.x+(bd.width+1)/2] = td->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd.width+1)/2) / float(bd.width);
-            expTerm[threadIdx.x+(bd.width+1)/2] = Complex(cos(angle[threadIdx.x+(bd.width+1)/2]), sin(angle[threadIdx.x+(bd.width+1)/2]));
-            sum[threadIdx.x+(bd.width+1)/2] = sum[threadIdx.x+(bd.width+1)/2] + data[t+(bd.width+1)/2] * bd.expTerm[threadIdx.x+(bd.width+1)/2];
+            expTerm[threadIdx.x+(bd->width+1)/2] = createComplexCUDA(cos(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd->width+1)/2) / float(bd->width)),\
+                    sin(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd->width+1)/2) / float(bd->width)));
+            sum[threadIdx.x+(bd->width+1)/2] = complexAdd(sum[threadIdx.x+(bd->width+1)/2],complexMult(data[blockIdx.x*bd->width+t],expTerm[threadIdx.x+(bd->width+1)/2]));
         }
     }
-    dftData[blockIdx.x * bd.width + threadIdx.x] = sum[threadIdx.x] * bd.sumOp;
-    if (threadIdx.x+(bd.width+1)/2 < bd.width) 
+    dftData[blockIdx.x * bd->width + threadIdx.x] = complexMult(sum[threadIdx.x],createComplexCUDA(bd->sumOp));
+    if (threadIdx.x+(bd->width+1)/2 < bd->width) 
     {
-        dftData[blockIdx.x * bd.width + threadIdx.x+(bd.width+1)/2] = sum[threadIdx.x+(bd.width+1)/2] * bd.sumOp;
+        dftData[blockIdx.x * bd->width + threadIdx.x+(bd->width+1)/2] = complexMult(sum[threadIdx.x+(bd->width+1)/2],createComplexCUDA(bd->sumOp));
     }
 }
 
 
-__global__ void blockDftVert(Complex *dftData, Complex *indata, struct blockData *hbd)
+__global__ void blockDftVert(struct ComplexCUDA *dftData, struct ComplexCUDA *indata, struct blockData *bd)
 {
-    __shared__ struct blockData bd;
-    bd = *hbd;
-    __shared__ Complex data[bd.height];
-    __shared__ double angle[bd.height];
-    __shared__ Complex expTerm[bd.height];
-    __shared__ Complex sum[bd.height];
+    __shared__ struct ComplexCUDA data[2048];
+    data[blockIdx.x*bd->width+threadIdx.x] = indata[blockIdx.x*bd->width+threadIdx.x];
+    __shared__ struct ComplexCUDA expTerm[2048];
+    __shared__ struct ComplexCUDA sum[2048];
 
-    data[threadIdx.x] = indata[threadIdx.x*bd.width+blockIdx.x];
-    data[threadIdx.x+(bd.height+1)/2] = indata[(threadIdx.x+(bd.height+1)/2)*bd.width+blockIdx.x];
-
-    for (int t = 0; t < bd.height; t++)
+    sum[threadIdx.x] = createComplexCUDA(0);
+    if (threadIdx.x+(bd->width+1)/2 < bd->width) 
     {
-        angle[threadIdx.x] = bd.expOp * 2.0 * M_PI * float(t) * float(threadIdx.x) / float(bd.height);
-        expTerm[threadIdx.x] = Complex(cos(angle[threadIdx.x]), sin(angle[threadIdx.x]));
-        sum[threadIdx.x] = sum[threadIdx.x] + data[t] * expTerm[threadIdx.x];
+        sum[threadIdx.x+(bd->width+1)/2] = createComplexCUDA(0);
+    }
+    __syncthreads();
+    for (int t = 0; t < bd->height; t++)
+    {
+        expTerm[threadIdx.x] = createComplexCUDA(cos(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x) / float(bd->height)),sin(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x) / float(bd->height)));
+        sum[threadIdx.x] = complexAdd(sum[threadIdx.x],complexMult(data[t*bd->width+blockIdx.x],expTerm[threadIdx.x]));
 
-        if (threadIdx.x+(bd.height+1)/2 < bd.height) 
+        if (threadIdx.x+(bd->height+1)/2 < bd->width) 
         {
-            angle[threadIdx.x+(bd.height+1)/2] = td->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd.height+1)/2) / float(bd.height);
-            expTerm[threadIdx.x+(bd.height+1)/2] = Complex(cos(angle[threadIdx.x+(bd.height+1)/2]), sin(angle[threadIdx.x+(bd.height+1)/2]));
-            sum[threadIdx.x+(bd.height+1)/2] = sum[threadIdx.x+(bd.height+1)/2] + data[t+(bd.height+1)/2] * bd.expTerm[threadIdx.x+(bd.height+1)/2];
+            expTerm[threadIdx.x+(bd->height+1)/2] = createComplexCUDA(cos(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd->height+1)/2) / float(bd->width)),\
+                    sin(bd->expOp * 2.0 * M_PI * float(t) * float(threadIdx.x+(bd->height+1)/2) / float(bd->width)));
+            sum[threadIdx.x+(bd->height+1)/2] = complexAdd(sum[threadIdx.x+(bd->height+1)/2],complexMult(data[t*bd->width+blockIdx.x],expTerm[threadIdx.x+(bd->height+1)/2]));
         }
     }
-    dftData2[threadIdx.x * bd.width + blockIdx.x] = sum[threadIdx.x] * bd.sumOp;
-    if (threadIdx.x+(bd.height+1)/2 < bd.height) 
+    dftData[threadIdx.x * bd->width + blockIdx.x] = complexMult(sum[threadIdx.x],createComplexCUDA(bd->sumOp));
+    if (threadIdx.x+(bd->height+1)/2 < bd->width) 
     {
-        dftData2[(threadIdx.x+(bd.height+1)/2) * bd.width + blockIdx.x] = sum[threadIdx.x+(bd.height+1)/2] * bd.sumOp;
+        dftData[(threadIdx.x+(bd->height+1)/2) * bd->width + blockIdx.x] = complexMult(sum[threadIdx.x+(bd->height+1)/2],createComplexCUDA(bd->sumOp));
     }
 }
 
@@ -93,40 +123,85 @@ __global__ void blockDftVert(Complex *dftData, Complex *indata, struct blockData
  */
 Complex *doDft(Complex *data, int width, int height, bool forward = true)
 {
+    // std::cout << "<doDft> VAR INIT....." ;
     int expOp = forward ? -1 : 1;
-    Complex sumOp = forward ? Complex(1.0) : Complex(float(1.0 / width));
+    float sumOp = forward ? float(1.0) : float(1.0 / width);
     Complex *dftData2 = new Complex[width * height];
+    struct ComplexCUDA dataCUDA[width*height];
+    struct ComplexCUDA dftData2CUDA[width*height];
+    // struct ComplexCUDA dftDataCUDA[width*height];
+    // std::cout << "done!" << std::endl;    
+    
+    // std::cout << "<doDft> ComplexCUDA Conversion....." ;
+    for (int iH=0;iH<height;iH++)
+    {
+        for (int iW=0;iW<width;iW++)
+        {
+            dataCUDA[iH*width+iW].real = data[iH*width+iW].real;
+            dataCUDA[iH*width+iW].imag = data[iH*width+iW].imag;
+        }
+    }
+    // std::cout << "done!" << std::endl;
 
-    struct blockData bd;
-
-    Complex *d_data;
-    Complex *d_dftData;
-    Complex *d_dftData2;
+    // std::cout << "<doDft> CUDA VAR INIT....." ;
+    struct ComplexCUDA *d_data;
+    struct ComplexCUDA *d_dftData;
+    struct ComplexCUDA *d_dftData2;
     struct blockData *d_bd;
+    // std::cout << "done!" << std::endl;
 
+    // std::cout << "<doDft> blockData INIT....." ;
+    struct blockData bd;
     bd.width = width;
     bd.height = height;
     bd.expOp = expOp;
     bd.sumOp = sumOp;
+    // std::cout << "done!" << std::endl;
 
-    cudaMalloc((void **) &d_data, sizeof(Complex[width*height]));
-    cudaMalloc((void **) &d_dftData, sizeof(Complex[width*height]));
-    cudaMalloc((void **) &d_dftData2, sizeof(Complex[width*height]));
+    // std::cout << "<doDft> CUDA MALLOC....." ;
+    cudaMalloc((void **) &d_data, sizeof(dataCUDA));
+    cudaMalloc((void **) &d_dftData, sizeof(dataCUDA));
+    cudaMalloc((void **) &d_dftData2, sizeof(dataCUDA));
     cudaMalloc((void **) &d_bd, sizeof(bd));
+    // std::cout << "done!" << std::endl;
 
-    cudaMemcpy(d_data, data, sizeof(Complex[width*height]), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_bd, bd, sizeof(bd), cudaMemcpyHostToDevice);
+    // std::cout << "<doDft> CUDA MEMCPY TO DEVICE....." ;
+    cudaMemcpy(d_data, dataCUDA, sizeof(dataCUDA), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_bd, &bd, sizeof(bd), cudaMemcpyHostToDevice);
+    // std::cout << "done!" << std::endl;
     
-    blockDtfHoriz<<<height,(width+1)/2>>>(d_dftData,d_data,d_bd);
+    // std::cout << "<blockDftHoriz>....." ;
+    blockDftHoriz<<<height,(width+1)/2>>>(d_dftData,d_data,d_bd);
+    // blockDftHoriz<<<height,width>>>(d_dftData,d_data,d_bd);
+    // std::cout << "done!" << std::endl;
 
+    // std::cout << "<blockDftVert>....." ;
     blockDftVert<<<width,(height+1)/2>>>(d_dftData2,d_dftData,d_bd);
+    // blockDftVert<<<width,height>>>(d_dftData2,d_dftData,d_bd);
+    // std::cout << "done!" << std::endl;
 
-    cudaMemcpy(dftData2, d_dftData2, sizeof(Complex[width*height]), cudaMemcpyDeviceToHost);
+    // std::cout << "<doDft> CUDA MEMCPY TO HOST....." ;
+    // cudaMemcpy(dftData2CUDA, d_dftData, sizeof(struct ComplexCUDA[width*height]), cudaMemcpyDeviceToHost);
+    cudaMemcpy(dftData2CUDA, d_dftData2, sizeof(struct ComplexCUDA[width*height]), cudaMemcpyDeviceToHost);
+    // std::cout << "done!" << std::endl;
 
+    // std::cout << "<doDft> Complex Conversion....." ;
+    for (int iH=0;iH<height;iH++)
+    {
+        for (int iW=0;iW<width;iW++)
+        {
+            dftData2[iH*width+iW].real = dftData2CUDA[iH*width+iW].real;
+            dftData2[iH*width+iW].imag = dftData2CUDA[iH*width+iW].imag;
+        }
+    }
+    std::cout << "done!" << std::endl;
+
+    // std::cout << "<doDft> CUDA MEMFREE....." ;
     cudaFree(d_data);
     cudaFree(d_dftData);
     cudaFree(d_dftData2);
     cudaFree(d_bd);
+    // std::cout << "done!" << std::endl;
 
     return dftData2;
 }
